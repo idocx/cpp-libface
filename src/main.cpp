@@ -30,7 +30,7 @@
 #include <algorithm>
 
 #if !defined NMAX
-#define NMAX 32
+#define NMAX 16
 #endif
 
 
@@ -348,11 +348,8 @@ escape_special_chars(std::string& str) {
             break;
 
         case '\n':
-            ret += "\\n";
-            break;
-
         case '\t':
-            ret += "\\t";
+        case '\r':
             break;
 
         default:
@@ -364,18 +361,19 @@ escape_special_chars(std::string& str) {
 
 std::string
 rich_suggestions_json_array(vp_t& suggestions) {
-    std::string ret = "[";
+    std::string ret = "{\"l\":[";
     ret.reserve(OUTPUT_SIZE_RESERVE);
     for (vp_t::iterator i = suggestions.begin(); i != suggestions.end(); ++i) {
-        escape_special_chars(i->phrase);
+        std::string phrase = i->phrase;
+        escape_special_chars(phrase);
         std::string snippet = i->snippet;
         escape_special_chars(snippet);
 
-        std::string trailer = i + 1 == suggestions.end() ? "\n" : ",\n";
-        ret += " { \"phrase\": \"" + i->phrase + "\", \"score\": " + uint_to_string(i->weight) + 
-            (snippet.empty() ? "" : ", \"snippet\": \"" + snippet + "\"") + " }" + trailer;
+        std::string trailer = i + 1 == suggestions.end() ? "" : ",";
+
+        ret += "\"" + phrase + "\"" + trailer;
     }
-    ret += "]";
+    ret += "]}";
     return ret;
 }
 
@@ -384,10 +382,11 @@ suggestions_json_array(vp_t& suggestions) {
     std::string ret = "[";
     ret.reserve(OUTPUT_SIZE_RESERVE);
     for (vp_t::iterator i = suggestions.begin(); i != suggestions.end(); ++i) {
-        escape_special_chars(i->phrase);
+        std::string phrase = i->phrase;
+        escape_special_chars(phrase);
 
-        std::string trailer = i + 1 == suggestions.end() ? "\n" : ",\n";
-        ret += "\"" + i->phrase + "\"" + trailer;
+        std::string trailer = i + 1 == suggestions.end() ? "" : ", ";
+        ret += "\"" + phrase + "\"" + trailer;
     }
     ret += "]";
     return ret;
@@ -513,7 +512,7 @@ do_import(std::string file, uint_t limit,
         // mmap() the input file in
         if_mmap_addr = (char*)mmap(NULL, if_length, PROT_READ, MAP_SHARED, fd, 0);
         if (if_mmap_addr == MAP_FAILED) {
-            fprintf(stderr, "length: %llu, fd: %d\n", if_length, fd);
+            fprintf(stderr, "length: %llu, fd: %d\n", (long long unsigned int)if_length, fd);
             perror("mmap");
             if (fin) { fclose(fin); }
             if (fd != -1) { close(fd); }
@@ -678,6 +677,14 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
         n = 1;
     }
 
+    headers["Content-Type"] = "application/json; charset=UTF-8"; 
+
+    if (q.length() <= 2) {
+        body = "{\"l\": []}";
+        write_response(client, 200, "OK", headers, body);
+        return;
+    }
+
     const bool has_cb = !cb.empty();
     str_lowercase(q);
     vp_t results = suggest(pm, st, q, n);
@@ -687,8 +694,9 @@ static void handle_suggest(client_t *client, parsed_url_t &url) {
       mg_printf(conn, "%s:%d\n", results[i].first.c_str(), results[i].second);
       }
     */
-    headers["Content-Type"] = "text/plain; charset=UTF-8";
+    
     if (has_cb) {
+        headers["Content-Type"] = "application/javascript; charset=UTF-8"; 
         body = cb + "(" + results_json(q, results, type) + ");\n";
     }
     else {
@@ -712,7 +720,7 @@ static void handle_stats(client_t *client, parsed_url_t &url) {
         b += sprintf(b, "Data Store is busy\n");
     }
     else {
-        b += sprintf(b, "Data store size: %d entries\n", pm.repr.size());
+        b += sprintf(b, "Data store size: %d entries\n", (int)pm.repr.size());
     }
     b += sprintf(b, "Memory usage: %d MiB\n", get_memory_usage(getpid())/1024);
     body = buff;
@@ -734,16 +742,16 @@ void serve_request(client_t *client) {
     std::string &request_uri = url.path;
     DCERR("request_uri: " << request_uri << endl);
 
-    if (request_uri == "/face/suggest/") {
+    if (request_uri == "/suggest/") {
         handle_suggest(client, url);
     }
-    else if (request_uri == "/face/import/") {
+    else if (request_uri == "/import/") {
         handle_import(client, url);
     }
-    else if (request_uri == "/face/export/") {
+    else if (request_uri == "/export/") {
         handle_export(client, url);
     }
-    else if (request_uri == "/face/stats/") {
+    else if (request_uri == "/stats/") {
         handle_stats(client, url);
     }
     else {
@@ -811,8 +819,6 @@ parse_options(int argc, char *argv[]) {
             break;
         }
     }
-
-
 }
 
 
